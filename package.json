@@ -25,9 +25,12 @@
   },
   "dependencies": {
     "bn.js": "4.11.8",
+    "bcrypto": "~0.3.1",
+    "bstring": "bcoin-org/bcstring#bstring",
+    "bufio": "~0.2.0",
     "elliptic": "6.4.0",
     "mongoose": "^4.11.9",
-    "n64": "0.0.18",
+    "n64": "~0.2.0",
     "bcoin-mongo-models": "https://github.com/bitpay/bcoin-mongo-models"
   },
   "optionalDependencies": {
