@@ -13,13 +13,14 @@ const Coin = require('../lib/primitives/coin');
 const Output = require('../lib/primitives/output');
 const LDB = require('../lib/db/ldb');
 let file = process.argv[2];
-let batch;
+let options = {};
+let db, batch, index;
 
 assert(typeof file === 'string', 'Please pass in a database path.');
 
 file = file.replace(/\.ldb\/?$/, '');
 
-const db = LDB({
+db = LDB({
   location: file,
   db: 'leveldb',
   compression: true,
@@ -28,14 +29,14 @@ const db = LDB({
   bufferKeys: true
 });
 
-const options = {};
+options = {};
 options.spv = process.argv.indexOf('--spv') !== -1;
 options.prune = process.argv.indexOf('--prune') !== -1;
 options.indexTX = process.argv.indexOf('--index-tx') !== -1;
 options.indexAddress = process.argv.indexOf('--index-address') !== -1;
 options.network = networks.main;
 
-const index = process.argv.indexOf('--network');
+index = process.argv.indexOf('--network');
 
 if (index !== -1) {
   options.network = networks[process.argv[index + 1]];
@@ -43,14 +44,16 @@ if (index !== -1) {
 }
 
 async function updateVersion() {
+  let data, ver;
+
   console.log('Checking version.');
 
-  const data = await db.get('V');
+  data = await db.get('V');
 
   if (!data)
     throw new Error('No DB version found!');
 
-  let ver = data.readUInt32LE(0, true);
+  ver = data.readUInt32LE(0, true);
 
   if (ver !== 1)
     throw Error(`DB is version ${ver}.`);
@@ -61,7 +64,7 @@ async function updateVersion() {
 }
 
 async function checkTipIndex() {
-  const keys = await db.keys({
+  let keys = await db.keys({
     gte: pair('p', encoding.ZERO_HASH),
     lte: pair('p', encoding.MAX_HASH)
   });
@@ -113,33 +116,38 @@ async function updateDeployments() {
 
 async function reserializeCoins() {
   let total = 0;
+  let i, iter, item, hash, old, coins, coin, output;
 
-  const iter = db.iterator({
+  iter = db.iterator({
     gte: pair('c', encoding.ZERO_HASH),
     lte: pair('c', encoding.MAX_HASH),
     values: true
   });
 
-  while (await iter.next()) {
-    const {key, value} = iter;
-    const hash = key.toString('hex', 1, 33);
-    const old = OldCoins.fromRaw(value, hash);
+  for (;;) {
+    item = await iter.next();
 
-    const coins = new Coins();
+    if (!item)
+      break;
+
+    hash = item.key.toString('hex', 1, 33);
+    old = OldCoins.fromRaw(item.value, hash);
+
+    coins = new Coins();
     coins.version = old.version;
     coins.hash = old.hash;
     coins.height = old.height;
     coins.coinbase = old.coinbase;
 
-    for (let i = 0; i < old.outputs.length; i++) {
-      const coin = old.get(i);
+    for (i = 0; i < old.outputs.length; i++) {
+      coin = old.get(i);
 
       if (!coin) {
         coins.outputs.push(null);
         continue;
       }
 
-      const output = new Output();
+      output = new Output();
       output.script = coin.script;
       output.value = coin.value;
 
@@ -149,7 +157,7 @@ async function reserializeCoins() {
 
     coins.cleanup();
 
-    batch.put(key, coins.toRaw());
+    batch.put(item.key, coins.toRaw());
 
     if (++total % 100000 === 0)
       console.log('Reserialized %d coins.', total);
@@ -160,21 +168,22 @@ async function reserializeCoins() {
 
 async function reserializeUndo() {
   let total = 0;
+  let iter, item, br, undo;
 
-  const iter = db.iterator({
+  iter = db.iterator({
     gte: pair('u', encoding.ZERO_HASH),
     lte: pair('u', encoding.MAX_HASH),
     values: true
   });
 
   for (;;) {
-    const item = await iter.next();
+    item = await iter.next();
 
     if (!item)
       break;
 
-    const br = new BufferReader(item.value);
-    const undo = new UndoCoins();
+    br = new BufferReader(item.value);
+    undo = new UndoCoins();
 
     while (br.left()) {
       undo.push(null);
@@ -193,11 +202,11 @@ async function reserializeUndo() {
 function write(data, str, off) {
   if (Buffer.isBuffer(str))
     return str.copy(data, off);
-  return data.write(str, off, 'hex');
+  data.write(str, off, 'hex');
 }
 
 function pair(prefix, hash) {
-  const key = Buffer.allocUnsafe(33);
+  let key = Buffer.allocUnsafe(33);
   if (typeof prefix === 'string')
     prefix = prefix.charCodeAt(0);
   key[0] = prefix;
@@ -206,7 +215,7 @@ function pair(prefix, hash) {
 }
 
 function injectCoin(undo, coin) {
-  const output = new Output();
+  let output = new Output();
 
   output.value = coin.value;
   output.script = coin.script;
@@ -218,7 +227,7 @@ function injectCoin(undo, coin) {
 }
 
 function defaultOptions() {
-  const bw = new BufferWriter();
+  let bw = new BufferWriter();
   let flags = 0;
 
   if (options.spv)
@@ -243,12 +252,13 @@ function defaultOptions() {
 }
 
 function defaultDeployments() {
-  const bw = new BufferWriter();
+  let bw = new BufferWriter();
+  let i, deployment;
 
   bw.writeU8(options.network.deploys.length);
 
-  for (let i = 0; i < options.network.deploys.length; i++) {
-    const deployment = options.network.deploys[i];
+  for (i = 0; i < options.network.deploys.length; i++) {
+    deployment = options.network.deploys[i];
     bw.writeU8(deployment.bit);
     bw.writeU32(deployment.startTime);
     bw.writeU32(deployment.timeout);

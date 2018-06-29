@@ -4,8 +4,6 @@
  * https://github.com/bcoin-org/bcoin
  */
 
-/* eslint-disable */
-
 'use strict';
 
 const assert = require('assert');
@@ -64,7 +62,7 @@ CoinView.prototype.addTX = function addTX(tx) {
  */
 
 CoinView.prototype.get = function get(hash, index) {
-  const coins = this.coins[hash];
+  let coins = this.coins[hash];
 
   if (!coins)
     return;
@@ -80,7 +78,7 @@ CoinView.prototype.get = function get(hash, index) {
  */
 
 CoinView.prototype.has = function has(hash, index) {
-  const coins = this.coins[hash];
+  let coins = this.coins[hash];
 
   if (!coins)
     return false;
@@ -96,7 +94,7 @@ CoinView.prototype.has = function has(hash, index) {
  */
 
 CoinView.prototype.spend = function spend(hash, index) {
-  const coins = this.coins[hash];
+  let coins = this.coins[hash];
 
   if (!coins)
     return;
@@ -130,8 +128,8 @@ CoinView.prototype.fillCoins = function fillCoins(tx) {
  */
 
 CoinView.prototype.toArray = function toArray() {
-  const keys = Object.keys(this.coins);
-  const out = [];
+  let keys = Object.keys(this.coins);
+  let out = [];
   let i, hash;
 
   for (i = 0; i < keys.length; i++) {

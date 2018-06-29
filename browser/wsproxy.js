@@ -1,6 +1,5 @@
 'use strict';
 
-const assert = require('assert');
 const net = require('net');
 const EventEmitter = require('events').EventEmitter;
 const IOServer = require('socket.io');
@@ -8,6 +7,8 @@ const util = require('../lib/utils/util');
 const digest = require('../lib/crypto/digest');
 const IP = require('../lib/utils/ip');
 const BufferWriter = require('../lib/utils/writer');
+
+const NAME_REGEX = /^[a-z0-9\-\.]+?\.(?:be|me|org|com|net|ch|de)$/i;
 
 const TARGET = Buffer.from(
   '0000ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
@@ -25,32 +26,27 @@ function WSProxy(options) {
   this.options = options;
   this.target = options.target || TARGET;
   this.pow = options.pow === true;
-  this.ports = new Set();
+  this.ports = options.ports || [];
   this.io = new IOServer();
   this.sockets = new WeakMap();
 
-  if (options.ports) {
-    for (const port of options.ports)
-      this.ports.add(port);
-  }
-
-  this.init();
+  this._init();
 }
 
-Object.setPrototypeOf(WSProxy.prototype, EventEmitter.prototype);
+util.inherits(WSProxy, EventEmitter);
 
-WSProxy.prototype.init = function init() {
+WSProxy.prototype._init = function _init() {
   this.io.on('error', (err) => {
     this.emit('error', err);
   });
 
   this.io.on('connection', (ws) => {
-    this.handleSocket(ws);
+    this._handleSocket(ws);
   });
 };
 
-WSProxy.prototype.handleSocket = function handleSocket(ws) {
-  const state = new SocketState(this, ws);
+WSProxy.prototype._handleSocket = function _handleSocket(ws) {
+  let state = new SocketState(this, ws);
 
   // Use a weak map to avoid
   // mutating the websocket object.
@@ -63,20 +59,20 @@ WSProxy.prototype.handleSocket = function handleSocket(ws) {
   });
 
   ws.on('tcp connect', (port, host, nonce) => {
-    this.handleConnect(ws, port, host, nonce);
+    this._handleConnect(ws, port, host, nonce);
   });
 };
 
-WSProxy.prototype.handleConnect = function handleConnect(ws, port, host, nonce) {
-  const state = this.sockets.get(ws);
-  assert(state);
+WSProxy.prototype._handleConnect = function _handleConnect(ws, port, host, nonce) {
+  let state = this.sockets.get(ws);
+  let socket, pow, raw;
 
   if (state.socket) {
     this.log('Client is trying to reconnect (%s).', state.host);
     return;
   }
 
-  if (!util.isU16(port)
+  if (!util.isNumber(port)
       || typeof host !== 'string'
       || host.length === 0) {
     this.log('Client gave bad arguments (%s).', state.host);
@@ -86,20 +82,19 @@ WSProxy.prototype.handleConnect = function handleConnect(ws, port, host, nonce) 
   }
 
   if (this.pow) {
-    if (!util.isU32(nonce)) {
+    if (!util.isNumber(nonce)) {
       this.log('Client did not solve proof of work (%s).', state.host);
       ws.emit('tcp close');
       ws.disconnect();
       return;
     }
 
-    const bw = new BufferWriter();
-    bw.writeU32(nonce);
-    bw.writeBytes(state.snonce);
-    bw.writeU32(port);
-    bw.writeString(host, 'ascii');
-
-    const pow = bw.render();
+    pow = new BufferWriter();
+    pow.writeU32(nonce);
+    pow.writeBytes(state.snonce);
+    pow.writeU32(port);
+    pow.writeString(host, 'ascii');
+    pow = pow.render();
 
     if (digest.hash256(pow).compare(this.target) > 0) {
       this.log('Client did not solve proof of work (%s).', state.host);
@@ -109,10 +104,9 @@ WSProxy.prototype.handleConnect = function handleConnect(ws, port, host, nonce) 
     }
   }
 
-  let raw, addr;
   try {
     raw = IP.toBuffer(host);
-    addr = IP.toString(raw);
+    host = IP.toString(raw);
   } catch (e) {
     this.log('Client gave a bad host: %s (%s).', host, state.host);
     ws.emit('tcp error', {
@@ -126,7 +120,7 @@ WSProxy.prototype.handleConnect = function handleConnect(ws, port, host, nonce) 
   if (!IP.isRoutable(raw) || IP.isOnion(raw)) {
     this.log(
       'Client is trying to connect to a bad ip: %s (%s).',
-      addr, state.host);
+      host, state.host);
     ws.emit('tcp error', {
       message: 'ENETUNREACH',
       code: 'ENETUNREACH'
@@ -135,7 +129,7 @@ WSProxy.prototype.handleConnect = function handleConnect(ws, port, host, nonce) 
     return;
   }
 
-  if (!this.ports.has(port)) {
+  if (this.ports.indexOf(port) === -1) {
     this.log('Client is connecting to non-whitelist port (%s).', state.host);
     ws.emit('tcp error', {
       message: 'ENETUNREACH',
@@ -145,9 +139,8 @@ WSProxy.prototype.handleConnect = function handleConnect(ws, port, host, nonce) 
     return;
   }
 
-  let socket;
   try {
-    socket = state.connect(port, addr);
+    socket = state.connect(port, host);
     this.log('Connecting to %s (%s).', state.remoteHost, state.host);
   } catch (e) {
     this.log(e.message);

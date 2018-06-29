@@ -1,5 +1,6 @@
 'use strict';
 
+const assert = require('assert');
 const util = require('../lib/utils/util');
 const Script = require('../lib/script/script');
 const Stack = require('../lib/script/stack');
@@ -9,72 +10,17 @@ const Output = require('../lib/primitives/output');
 const Outpoint = require('../lib/primitives/outpoint');
 const TX = require('../lib/primitives/tx');
 const random = require('../lib/crypto/random');
-const secp256k1 = require('../lib/crypto/secp256k1');
-const flags = Script.flags;
 
-let consensus = null;
-
-try {
-  consensus = require('nodeconsensus');
-} catch (e) {
-  ;
-}
-
-if (consensus)
-  util.log('Running against bitcoinconsensus...');
-
-const MANDATORY = flags.MANDATORY_VERIFY_FLAGS | flags.VERIFY_WITNESS;
-const STANDARD = flags.STANDARD_VERIFY_FLAGS;
-
-function verifyConsensus(tx, index, output, value, flags) {
-  if (!consensus)
-    return 'OK';
-  return consensus.verify(tx.toRaw(), index, output.toRaw(), value, flags);
-}
-
-function assertConsensus(tx, output, flags, code) {
-  if (!consensus)
-    return;
-
-  const err = verifyConsensus(tx, 0, output, 0, flags);
-
-  if (err !== code) {
-    util.log('bitcoinconsensus mismatch!');
-    util.log(`${err} (bitcoin core) !== ${code} (bcoin)`);
-    util.log(tx);
-    util.log(output);
-    util.log(flags);
-    util.log('TX: %s', tx.toRaw().toString('hex'));
-    util.log('Output Script: %s', output.toRaw().toString('hex'));
-  }
-}
-
-function randomSignature() {
-  const r = secp256k1.generatePrivateKey();
-  const s = secp256k1.generatePrivateKey();
-  return secp256k1.toDER(Buffer.concat([r, s]));
-}
-
-function randomKey() {
-  const x = secp256k1.generatePrivateKey();
-  const y = secp256k1.generatePrivateKey();
-
-  if (util.random(0, 2) === 0) {
-    const p = Buffer.from([2 | (y[y.length - 1] & 1)]);
-    return Buffer.concat([p, x]);
-  }
-
-  const p = Buffer.from([4]);
-  return Buffer.concat([p, x, y]);
-}
+const MANDATORY = Script.flags.MANDATORY_VERIFY_FLAGS | Script.flags.VERIFY_WITNESS;
+const STANDARD = Script.flags.STANDARD_VERIFY_FLAGS;
 
 function randomOutpoint() {
-  const hash = random.randomBytes(32).toString('hex');
+  let hash = random.randomBytes(32).toString('hex');
   return new Outpoint(hash, util.random(0, 0xffffffff));
 }
 
 function randomInput() {
-  const input = Input.fromOutpoint(randomOutpoint());
+  let input = Input.fromOutpoint(randomOutpoint());
 
   if (util.random(0, 5) === 0)
     input.sequence = util.random(0, 0xffffffff);
@@ -87,17 +33,18 @@ function randomOutput() {
 }
 
 function randomTX() {
-  const tx = new TX();
-  const inputs = util.random(1, 5);
-  const outputs = util.random(0, 5);
+  let tx = new TX();
+  let inputs = util.random(1, 5);
+  let outputs = util.random(0, 5);
+  let i;
 
   tx.version = util.random(0, 0xffffffff);
 
-  for (let i = 0; i < inputs; i++)
+  for (i = 0; i < inputs; i++)
     tx.inputs.push(randomInput());
 
-  for (let i = 0; i < outputs; i++)
-    tx.outputs.push(randomOutput());
+  for (i = 0; i < outputs; i++)
+    tx.inputs.push(randomOutput());
 
   if (util.random(0, 5) === 0)
     tx.locktime = util.random(0, 0xffffffff);
@@ -108,11 +55,12 @@ function randomTX() {
 }
 
 function randomWitness(redeem) {
-  const size = util.random(1, 100);
-  const witness = new Witness();
+  let size = util.random(1, 100);
+  let witness = new Witness();
+  let i, len;
 
-  for (let i = 0; i < size; i++) {
-    const len = util.random(0, 100);
+  for (i = 0; i < size; i++) {
+    len = util.random(0, 100);
     witness.push(random.randomBytes(len));
   }
 
@@ -125,30 +73,37 @@ function randomWitness(redeem) {
 }
 
 function randomInputScript(redeem) {
-  const size = util.random(1, 100);
-  const script = new Script();
+  let size = util.random(1, 100);
+  let script = new Script();
+  let i, len;
 
-  for (let i = 0; i < size; i++) {
-    const len = util.random(0, 100);
-    script.pushData(random.randomBytes(len));
+  for (i = 0; i < size; i++) {
+    len = util.random(0, 100);
+    script.push(random.randomBytes(len));
   }
 
   if (redeem)
-    script.pushData(redeem);
+    script.push(redeem);
 
-  return script.compile();
+  script.compile();
+
+  return script;
 }
 
 function randomOutputScript() {
-  const size = util.random(1, 10000);
+  let size = util.random(1, 10000);
   return Script.fromRaw(random.randomBytes(size));
 }
 
 function isPushOnly(script) {
+  let i, op;
+
   if (script.isPushOnly())
     return true;
 
-  for (const op of script.code) {
+  for (i = 0; i < script.code.length; i++) {
+    op = script.code[i];
+
     if (op.value === Script.opcodes.NOP)
       continue;
 
@@ -165,7 +120,7 @@ function isPushOnly(script) {
 }
 
 function randomPubkey() {
-  const len = util.random(0, 2) === 0 ? 33 : 65;
+  let len = util.random(0, 2) === 0 ? 33 : 65;
   return Script.fromPubkey(random.randomBytes(len));
 }
 
@@ -174,12 +129,13 @@ function randomPubkeyhash() {
 }
 
 function randomMultisig() {
-  const n = util.random(1, 16);
-  const m = util.random(1, n);
-  const keys = [];
+  let n = util.random(1, 16);
+  let m = util.random(1, n);
+  let keys = [];
+  let i, len;
 
-  for (let i = 0; i < n; i++) {
-    const len = util.random(0, 2) === 0 ? 33 : 65;
+  for (i = 0; i < n; i++) {
+    len = util.random(0, 2) === 0 ? 33 : 65;
     keys.push(random.randomBytes(len));
   }
 
@@ -199,8 +155,8 @@ function randomWitnessScripthash() {
 }
 
 function randomProgram() {
-  const version = util.random(0, 16);
-  const size = util.random(2, 41);
+  let version = util.random(0, 16);
+  let size = util.random(2, 41);
   return Script.fromProgram(version, random.randomBytes(size));
 }
 
@@ -217,7 +173,7 @@ function randomRedeem() {
     case 4:
       return randomProgram();
   }
-  throw new Error();
+  assert(false);
 }
 
 function randomScript() {
@@ -237,7 +193,7 @@ function randomScript() {
     case 6:
       return randomProgram();
   }
-  throw new Error();
+  assert(false);
 }
 
 function randomPubkeyContext() {
@@ -259,7 +215,7 @@ function randomPubkeyhashContext() {
 }
 
 function randomScripthashContext() {
-  const redeem = randomRedeem();
+  let redeem = randomRedeem();
   return {
     input: randomInputScript(redeem.toRaw()),
     witness: new Witness(),
@@ -278,7 +234,7 @@ function randomWitnessPubkeyhashContext() {
 }
 
 function randomWitnessScripthashContext() {
-  const redeem = randomRedeem();
+  let redeem = randomRedeem();
   return {
     input: new Script(),
     witness: randomWitness(redeem.toRaw()),
@@ -288,10 +244,10 @@ function randomWitnessScripthashContext() {
 }
 
 function randomWitnessNestedContext() {
-  const redeem = randomRedeem();
-  const program = Script.fromProgram(0, redeem.sha256());
+  let redeem = randomRedeem();
+  let program = Script.fromProgram(0, redeem.sha256());
   return {
-    input: Script.fromItems([program.toRaw()]),
+    input: new Script([program.toRaw()]),
     witness: randomWitness(redeem.toRaw()),
     output: Script.fromScripthash(program.hash160()),
     redeem: redeem
@@ -313,12 +269,13 @@ function randomContext() {
     case 5:
       return randomWitnessNestedContext();
   }
-  throw new Error();
+  assert(false);
 }
 
 function fuzzSimple(flags) {
   let tx = randomTX();
   let total = -1;
+  let stack, input, output;
 
   for (;;) {
     if (++total % 1000 === 0)
@@ -327,8 +284,8 @@ function fuzzSimple(flags) {
     if (total % 500 === 0)
       tx = randomTX();
 
-    const stack = new Stack();
-    const input = randomInputScript();
+    stack = new Stack();
+    input = randomInputScript();
 
     try {
       input.execute(stack, flags, tx, 0, 0, 0);
@@ -338,7 +295,7 @@ function fuzzSimple(flags) {
       throw e;
     }
 
-    const output = randomOutputScript();
+    output = randomOutputScript();
 
     try {
       output.execute(stack, flags, tx, 0, 0, 0);
@@ -351,7 +308,7 @@ function fuzzSimple(flags) {
     if (stack.length === 0)
       continue;
 
-    if (!stack.getBool(-1))
+    if (!Script.bool(stack.top(-1)))
       continue;
 
     if (isPushOnly(output))
@@ -375,6 +332,7 @@ function fuzzSimple(flags) {
 function fuzzVerify(flags) {
   let tx = randomTX();
   let total = -1;
+  let input, output, witness;
 
   for (;;) {
     if (++total % 1000 === 0)
@@ -383,14 +341,9 @@ function fuzzVerify(flags) {
     if (total % 500 === 0)
       tx = randomTX();
 
-    const input = randomInputScript();
-    const witness = randomWitness();
-    const output = randomOutputScript();
-
-    tx.inputs[0].script = input;
-    tx.inputs[0].witness = witness;
-
-    tx.refresh();
+    input = randomInputScript();
+    witness = randomWitness();
+    output = randomOutputScript();
 
     try {
       Script.verify(
@@ -403,14 +356,10 @@ function fuzzVerify(flags) {
         flags
       );
     } catch (e) {
-      if (e.type === 'ScriptError') {
-        assertConsensus(tx, output, flags, e.code);
+      if (e.type === 'ScriptError')
         continue;
-      }
       throw e;
     }
-
-    assertConsensus(tx, output, flags, 'OK');
 
     if (isPushOnly(output))
       continue;
@@ -433,6 +382,7 @@ function fuzzVerify(flags) {
 function fuzzLess(flags) {
   let tx = randomTX();
   let total = -1;
+  let ctx;
 
   for (;;) {
     if (++total % 1000 === 0)
@@ -441,13 +391,7 @@ function fuzzLess(flags) {
     if (total % 500 === 0)
       tx = randomTX();
 
-    const ctx = randomContext();
-    const input = tx.inputs[0];
-
-    input.script = ctx.input;
-    input.witness = ctx.witness;
-
-    tx.refresh();
+    ctx = randomContext();
 
     try {
       Script.verify(
@@ -460,14 +404,10 @@ function fuzzLess(flags) {
         flags
       );
     } catch (e) {
-      if (e.type === 'ScriptError') {
-        assertConsensus(tx, ctx.output, flags, e.code);
+      if (e.type === 'ScriptError')
         continue;
-      }
       throw e;
     }
-
-    assertConsensus(tx, ctx.output, flags, 'OK');
 
     util.log('Produced valid scripts:');
 
@@ -490,20 +430,15 @@ function fuzzLess(flags) {
 }
 
 function main() {
-  const flags = process.argv.indexOf('--standard') !== -1
-    ? STANDARD
-    : MANDATORY;
+  let flags = process.argv.indexOf('--standard') !== -1 ? STANDARD : MANDATORY;
 
   switch (process.argv[2]) {
     case 'simple':
-      fuzzSimple(flags);
-      break;
+      return fuzzSimple(flags);
     case 'verify':
-      fuzzVerify(flags);
-      break;
+      return fuzzVerify(flags);
     case 'less':
-      fuzzLess(flags);
-      break;
+      return fuzzLess(flags);
     default:
       util.log('Please select a mode:');
       util.log('simple, verify, less');
@@ -511,8 +446,5 @@ function main() {
       break;
   }
 }
-
-randomKey;
-randomSignature;
 
 main();

@@ -1,16 +1,22 @@
 'use strict';
 
+const BN = require('../lib/crypto/bn');
 const util = require('../lib/utils/util');
 const consensus = require('../lib/protocol/consensus');
 const encoding = require('../lib/utils/encoding');
 const TX = require('../lib/primitives/tx');
 const Block = require('../lib/primitives/block');
 const Script = require('../lib/script/script');
+const Opcode = require('../lib/script/opcode');
+const opcodes = Script.opcodes;
+
+let main, testnet, regtest, segnet3, segnet4, btcd;
 
 function createGenesisBlock(options) {
   let flags = options.flags;
-  let key = options.key;
+  let script = options.script;
   let reward = options.reward;
+  let tx, block;
 
   if (!flags) {
     flags = Buffer.from(
@@ -18,90 +24,93 @@ function createGenesisBlock(options) {
       'ascii');
   }
 
-  if (!key) {
-    key = Buffer.from(''
-      + '04678afdb0fe5548271967f1a67130b7105cd6a828e039'
-      + '09a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c3'
-      + '84df7ba0b8d578a4c702b6bf11d5f', 'hex');
+  if (!script) {
+    script = Script.fromArray([
+      Buffer.from('04678afdb0fe5548271967f1a67130b7105cd6a828e039'
+        + '09a67962e0ea1f61deb649f6bc3f4cef38c4f35504e51ec112de5c3'
+        + '84df7ba0b8d578a4c702b6bf11d5f', 'hex'),
+      opcodes.OP_CHECKSIG
+    ]);
   }
 
   if (!reward)
     reward = 50 * consensus.COIN;
 
-  const tx = new TX({
+  tx = new TX({
     version: 1,
+    flag: 1,
     inputs: [{
       prevout: {
         hash: encoding.NULL_HASH,
         index: 0xffffffff
       },
-      script: Script()
-        .pushInt(486604799)
-        .pushPush(Buffer.from([4]))
-        .pushData(flags)
-        .compile(),
+      script: [
+        Opcode.fromNumber(new BN(486604799)),
+        Opcode.fromPush(Buffer.from([4])),
+        Opcode.fromData(flags)
+      ],
       sequence: 0xffffffff
     }],
     outputs: [{
       value: reward,
-      script: Script.fromPubkey(key)
+      script: script
     }],
     locktime: 0
   });
 
-  const block = new Block({
+  block = new Block({
     version: options.version,
     prevBlock: encoding.NULL_HASH,
     merkleRoot: tx.hash('hex'),
-    time: options.time,
+    ts: options.ts,
     bits: options.bits,
     nonce: options.nonce,
     height: 0
   });
 
-  block.txs.push(tx);
+  block.addTX(tx);
 
   return block;
 }
 
-const main = createGenesisBlock({
+main = createGenesisBlock({
   version: 1,
-  time: 1231006505,
+  ts: 1231006505,
   bits: 486604799,
   nonce: 2083236893
 });
 
-const testnet = createGenesisBlock({
+testnet = createGenesisBlock({
   version: 1,
-  time: 1296688602,
+  ts: 1296688602,
   bits: 486604799,
   nonce: 414098458
 });
 
-const regtest = createGenesisBlock({
+regtest = createGenesisBlock({
   version: 1,
-  time: 1296688602,
+  ts: 1296688602,
   bits: 545259519,
   nonce: 2
 });
 
-const segnet3 = createGenesisBlock({
+segnet3 = createGenesisBlock({
   version: 1,
-  time: 1452831101,
+  ts: 1452831101,
   bits: 486604799,
   nonce: 0
 });
 
-const segnet4 = createGenesisBlock({
+segnet4 = createGenesisBlock({
   version: 1,
-  time: 1452831101,
+  ts: 1452831101,
   bits: 503447551,
   nonce: 0
 });
 
-const btcd = createGenesisBlock({
+btcd = createGenesisBlock({
   version: 1,
-  time: 1401292357,
+  ts: 1401292357,
   bits: 545259519,
   nonce: 2
 });

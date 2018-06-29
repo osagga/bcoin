@@ -7,14 +7,15 @@ const WalletDB = require('../lib/wallet/walletdb');
 const BufferReader = require('../lib/utils/reader');
 const TX = require('../lib/primitives/tx');
 const Coin = require('../lib/primitives/coin');
+const util = require('../lib/utils/util');
 let file = process.argv[2];
-let batch;
+let db, batch;
 
 assert(typeof file === 'string', 'Please pass in a database path.');
 
 file = file.replace(/\.ldb\/?$/, '');
 
-const db = bcoin.ldb({
+db = bcoin.ldb({
   location: file,
   db: 'leveldb',
   compression: true,
@@ -24,14 +25,15 @@ const db = bcoin.ldb({
 });
 
 async function updateVersion() {
-  const bak = `${process.env.HOME}/walletdb-bak-${Date.now()}.ldb`;
+  let bak = `${process.env.HOME}/walletdb-bak-${Date.now()}.ldb`;
+  let data, ver;
 
   console.log('Checking version.');
 
-  const data = await db.get('V');
+  data = await db.get('V');
   assert(data, 'No version.');
 
-  let ver = data.readUInt32LE(0, true);
+  ver = data.readUInt32LE(0, true);
 
   if (ver !== 3)
     throw Error(`DB is version ${ver}.`);
@@ -47,30 +49,31 @@ async function updateVersion() {
 
 async function updateTXDB() {
   let txs = {};
+  let i, keys, key, hash, tx, walletdb;
 
-  const keys = await db.keys({
+  keys = await db.keys({
     gte: Buffer.from([0x00]),
     lte: Buffer.from([0xff])
   });
 
-  for (let i = 0; i < keys.length; i++) {
-    const key = keys[i];
+  for (i = 0; i < keys.length; i++) {
+    key = keys[i];
     if (key[0] === 0x74 && key[5] === 0x74) {
-      let tx = await db.get(key);
+      tx = await db.get(key);
       tx = fromExtended(tx);
-      const hash = tx.hash('hex');
+      hash = tx.hash('hex');
       txs[hash] = tx;
     }
     if (key[0] === 0x74)
       batch.del(key);
   }
 
-  txs = getValues(txs);
+  txs = util.values(txs);
 
   await batch.write();
   await db.close();
 
-  const walletdb = new WalletDB({
+  walletdb = new WalletDB({
     location: file,
     db: 'leveldb',
     resolution: true,
@@ -80,8 +83,8 @@ async function updateTXDB() {
 
   await walletdb.open();
 
-  for (let i = 0; i < txs.length; i++) {
-    const tx = txs[i];
+  for (i = 0; i < txs.length; i++) {
+    tx = txs[i];
     await walletdb.addTX(tx);
   }
 
@@ -89,16 +92,17 @@ async function updateTXDB() {
 }
 
 function fromExtended(data, saveCoins) {
-  const tx = new TX();
-  const p = BufferReader(data);
+  let tx = new TX();
+  let p = BufferReader(data);
+  let i, coinCount, coin;
 
   tx.fromRaw(p);
 
   tx.height = p.readU32();
   tx.block = p.readHash('hex');
   tx.index = p.readU32();
-  tx.time = p.readU32();
-  tx.mtime = p.readU32();
+  tx.ts = p.readU32();
+  tx.ps = p.readU32();
 
   if (tx.block === encoding.NULL_HASH)
     tx.block = null;
@@ -110,9 +114,9 @@ function fromExtended(data, saveCoins) {
     tx.index = -1;
 
   if (saveCoins) {
-    const coinCount = p.readVarint();
-    for (let i = 0; i < coinCount; i++) {
-      let coin = p.readVarBytes();
+    coinCount = p.readVarint();
+    for (i = 0; i < coinCount; i++) {
+      coin = p.readVarBytes();
       if (coin.length === 0)
         continue;
       coin = Coin.fromRaw(coin);
@@ -123,15 +127,6 @@ function fromExtended(data, saveCoins) {
   }
 
   return tx;
-}
-
-function getValues(map) {
-  const items = [];
-
-  for (const key of Object.keys(map))
-    items.push(map[key]);
-
-  return items;
 }
 
 (async () => {

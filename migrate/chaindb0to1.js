@@ -19,49 +19,53 @@ const db = bcoin.ldb({
 });
 
 function makeKey(data) {
-  const height = data.readUInt32LE(1, true);
-  const key = Buffer.allocUnsafe(5);
+  let height = data.readUInt32LE(1, true);
+  let key = Buffer.allocUnsafe(5);
   key[0] = 0x48;
   key.writeUInt32BE(height, 1, true);
   return key;
 }
 
 async function checkVersion() {
+  let data, ver;
+
   console.log('Checking version.');
 
-  const data = await db.get('V');
+  data = await db.get('V');
 
   if (!data)
     return;
 
-  const ver = data.readUInt32LE(0, true);
+  ver = data.readUInt32LE(0, true);
 
   if (ver !== 0)
     throw Error(`DB is version ${ver}.`);
 }
 
 async function updateState() {
+  let data, hash, batch, ver, p;
+
   console.log('Updating chain state.');
 
-  const data = await db.get('R');
+  data = await db.get('R');
 
   if (!data || data.length < 32)
     throw new Error('No chain state.');
 
-  const hash = data.slice(0, 32);
+  hash = data.slice(0, 32);
 
-  let p = new BufferWriter();
+  p = new BufferWriter();
   p.writeHash(hash);
   p.writeU64(0);
   p.writeU64(0);
   p.writeU64(0);
   p = p.render();
 
-  const batch = db.batch();
+  batch = db.batch();
 
   batch.put('R', p);
 
-  const ver = Buffer.allocUnsafe(4);
+  ver = Buffer.allocUnsafe(4);
   ver.writeUInt32LE(1, 0, true);
   batch.put('V', ver);
 
@@ -71,22 +75,27 @@ async function updateState() {
 }
 
 async function updateEndian() {
-  const batch = db.batch();
+  let batch = db.batch();
   let total = 0;
+  let iter, item;
 
   console.log('Updating endianness.');
   console.log('Iterating...');
 
-  const iter = db.iterator({
+  iter = db.iterator({
     gte: Buffer.from('4800000000', 'hex'),
     lte: Buffer.from('48ffffffff', 'hex'),
     values: true
   });
 
-  while (await iter.next()) {
-    const {key, value} = iter;
-    batch.del(key);
-    batch.put(makeKey(key), value);
+  for (;;) {
+    item = await iter.next();
+
+    if (!item)
+      break;
+
+    batch.del(item.key);
+    batch.put(makeKey(item.key), item.value);
     total++;
   }
 

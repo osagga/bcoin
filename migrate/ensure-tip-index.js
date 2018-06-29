@@ -9,13 +9,13 @@ const LDB = require('../lib/db/ldb');
 const BN = require('../lib/crypto/bn');
 const DUMMY = Buffer.from([0]);
 let file = process.argv[2];
-let batch;
+let db, batch;
 
 assert(typeof file === 'string', 'Please pass in a database path.');
 
 file = file.replace(/\.ldb\/?$/, '');
 
-const db = LDB({
+db = LDB({
   location: file,
   db: 'leveldb',
   compression: true,
@@ -25,23 +25,25 @@ const db = LDB({
 });
 
 async function checkVersion() {
+  let data, ver;
+
   console.log('Checking version.');
 
-  const data = await db.get('V');
+  data = await db.get('V');
 
   if (!data)
     return;
 
-  const ver = data.readUInt32LE(0, true);
+  ver = data.readUInt32LE(0, true);
 
   if (ver !== 1)
     throw Error(`DB is version ${ver}.`);
 }
 
 function entryFromRaw(data) {
-  const p = new BufferReader(data, true);
-  const hash = digest.hash256(p.readBytes(80));
-  const entry = {};
+  let p = new BufferReader(data, true);
+  let hash = digest.hash256(p.readBytes(80));
+  let entry = {};
 
   p.seek(-80);
 
@@ -49,7 +51,7 @@ function entryFromRaw(data) {
   entry.version = p.readU32(); // Technically signed
   entry.prevBlock = p.readHash('hex');
   entry.merkleRoot = p.readHash('hex');
-  entry.time = p.readU32();
+  entry.ts = p.readU32();
   entry.bits = p.readU32();
   entry.nonce = p.readU32();
   entry.height = p.readU32();
@@ -67,10 +69,10 @@ function getEntries() {
 }
 
 async function getTip(entry) {
-  const state = await db.get('R');
+  let state = await db.get('R');
   assert(state);
-  const tip = state.toString('hex', 0, 32);
-  const data = await db.get(pair('e', tip));
+  let tip = state.toString('hex', 0, 32);
+  let data = await db.get(pair('e', tip));
   assert(data);
   return entryFromRaw(data);
 }
@@ -88,31 +90,32 @@ async function isMainChain(entry, tip) {
 // And this insane function is why we should
 // be indexing tips in the first place!
 async function indexTips() {
-  const entries = await getEntries();
-  const tip = await getTip();
-  const tips = [];
-  const orphans = [];
-  const prevs = {};
+  let entries = await getEntries();
+  let tip = await getTip();
+  let tips = [];
+  let orphans = [];
+  let prevs = {};
+  let i, orphan, entry, main;
 
-  for (let i = 0; i < entries.length; i++) {
-    const entry = entries[i];
-    const main = await isMainChain(entry, tip.hash);
+  for (i = 0; i < entries.length; i++) {
+    entry = entries[i];
+    main = await isMainChain(entry, tip.hash);
     if (!main) {
       orphans.push(entry);
       prevs[entry.prevBlock] = true;
     }
   }
 
-  for (let i = 0; i < orphans.length; i++) {
-    const orphan = orphans[i];
+  for (i = 0; i < orphans.length; i++) {
+    orphan = orphans[i];
     if (!prevs[orphan.hash])
       tips.push(orphan.hash);
   }
 
   tips.push(tip.hash);
 
-  for (let i = 0; i < tips.length; i++) {
-    const tip = tips[i];
+  for (i = 0; i < tips.length; i++) {
+    tip = tips[i];
     console.log('Indexing chain tip: %s.', util.revHex(tip));
     batch.put(pair('p', tip), DUMMY);
   }
@@ -121,11 +124,11 @@ async function indexTips() {
 function write(data, str, off) {
   if (Buffer.isBuffer(str))
     return str.copy(data, off);
-  return data.write(str, off, 'hex');
+  data.write(str, off, 'hex');
 }
 
 function pair(prefix, hash) {
-  const key = Buffer.allocUnsafe(33);
+  let key = Buffer.allocUnsafe(33);
   if (typeof prefix === 'string')
     prefix = prefix.charCodeAt(0);
   key[0] = prefix;
